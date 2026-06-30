@@ -1,0 +1,195 @@
+# ladder.yml -- sanitized worked example. Values are representative, not host-specific.
+# Use this as the pattern for what a populated ladder.yml looks like -- including the
+# invalidated rungs, which are the most instructive part.
+
+rungs:
+  - rung:
+      index: 1
+      timestamp: "2026-01-01T10:00:00Z"
+      model_key: example-35b-nvfp4   # baseline reference rung, different model, same card
+      served_model_name: "example-35b-nvfp4"
+      model_path: "/models/example-35b-nvfp4"
+      params:
+        max_model_len: 32768
+        max_num_batched_tokens: 32768
+        max_num_seqs: 1
+        gpu_memory_utilization: 0.90
+        kv_cache_dtype: fp8
+        attention_backend: flashinfer
+        limit_mm_per_prompt: ""
+        extra_flags: ["--moe-backend marlin"]
+      env:
+        pytorch_cuda_alloc_conf: "expandable_segments:True"
+        vllm_version: "0.0.0-example"
+        gpu: "Example GPU 32GB"
+        gpu_total_capacity_gib: 31.41
+      outcome:
+        status: boot_ok
+        failure_site: null
+        oom_requested_bytes: null
+        oom_free_bytes: null
+      signal:
+        model_loading_gib: 20.38
+        available_kv_cache_gib: null   # not captured this run -- log didn't include it
+        gpu_kv_cache_tokens: null
+        max_concurrency: null
+        cudagraph_pool_gib: null
+        boot_time_seconds: null
+      smoke_test:
+        attempted: false
+        long_context_tokens: null
+        prefill_completed: false
+        reasoning_channel_split_verified: false
+        notes: "Reference rung only -- this is the 35B baseline, not part of the 27B climb. Two non-fatal expandable_segments fragmentation warnings observed during load even with the flag correctly set; did not block boot."
+      notes: "Baseline for comparison. moe_backend=marlin observed as the available NVFP4 MoE backend for this example architecture."
+
+  - rung:
+      index: 2
+      timestamp: "2026-01-01T10:10:00Z"
+      model_key: example-27b-nvfp4
+      served_model_name: "example-27b-nvfp4"
+      model_path: "/models/example-27b-nvfp4"
+      params:
+        max_model_len: 131072
+        max_num_batched_tokens: 131072
+        max_num_seqs: 1
+        gpu_memory_utilization: 0.90
+        kv_cache_dtype: fp8
+        attention_backend: flashinfer
+        limit_mm_per_prompt: ""   # NOT SET -- this is the bug this rung exposes
+        extra_flags: []
+      env:
+        pytorch_cuda_alloc_conf: "expandable_segments:True"
+        vllm_version: "0.0.0-example"
+        gpu: "Example GPU 32GB"
+        gpu_total_capacity_gib: 31.41
+      outcome:
+        status: oom_profile
+        failure_site: "gpu_model_runner.py:6295 profile_run -> embed_multimodal -> example_vl.py:455 visual attn qkv linear"
+        oom_requested_bytes: 3630000000   # 3.38 GiB
+        oom_free_bytes: 2050000000        # 1.91 GiB
+      signal:
+        model_loading_gib: 19.78
+        available_kv_cache_gib: null
+        gpu_kv_cache_tokens: null
+        max_concurrency: null
+        cudagraph_pool_gib: null
+        boot_time_seconds: null
+      smoke_test:
+        attempted: false
+        long_context_tokens: null
+        prefill_completed: false
+        reasoning_channel_split_verified: false
+        notes: ""
+      notes: >
+        INVALID rung per the 02-record-ceiling classification table: this example model
+        has a vision tower that the baseline doesn't route through,
+        and limit_mm_per_prompt was never set to disable multimodal profiling. This OOM
+        is a multimodal-profiling-cost artifact, not a real context-length ceiling. Fixed
+        in rung 3 by setting limit_mm_per_prompt='{"image":0,"video":0}'. Also discovered
+        here: this is architecturally dense, not MoE --
+        --moe-backend marlin from rung 1 does not apply and was correctly dropped.
+
+  - rung:
+      index: 3
+      timestamp: "2026-01-01T10:20:00Z"
+      model_key: example-27b-nvfp4
+      served_model_name: "example-27b-nvfp4"
+      model_path: "/models/example-27b-nvfp4"
+      params:
+        max_model_len: 65536
+        max_num_batched_tokens: 65536
+        max_num_seqs: 1
+        gpu_memory_utilization: 0.85
+        kv_cache_dtype: fp8
+        attention_backend: flashinfer
+        limit_mm_per_prompt: '{"image": 0, "video": 0}'
+        extra_flags: []
+      env:
+        pytorch_cuda_alloc_conf: "expandable_segments:True"
+        vllm_version: "0.0.0-example"
+        gpu: "Example GPU 32GB"
+        gpu_total_capacity_gib: 31.41
+      outcome:
+        status: oom_compile
+        failure_site: "gpu_model_runner.py:5967 _dummy_run -> example_model.py forward -> torch.ops._C.marlin_gemm during profile_run at max_num_tokens"
+        oom_requested_bytes: 4563402752   # 4.25 GiB
+        oom_free_bytes: 1906376704        # 1.78 GiB
+      signal:
+        model_loading_gib: 19.12
+        available_kv_cache_gib: null
+        gpu_kv_cache_tokens: null
+        max_concurrency: null
+        cudagraph_pool_gib: null
+        boot_time_seconds: null
+      smoke_test:
+        attempted: false
+        long_context_tokens: null
+        prefill_completed: false
+        reasoning_channel_split_verified: false
+        notes: ""
+      notes: >
+        Multimodal fix from rung 2 confirmed working: "registry.py:134 All limits of
+        multimodal modalities supported by the model are set to 0, running in text-only
+        mode" logged twice (APIServer and EngineCore). Got further than rung 2 -- passed
+        weight load, torch.compile (50.95s), into profile_run's dummy forward at
+        max_num_tokens=65536. This OOM scales with max_num_batched_tokens (the dummy
+        profiling batch size), not max_model_len directly -- per 01-run-rung.md's rule,
+        raising both together (as this rung did, 131072->65536 was actually a *drop* on
+        both simultaneously from rung 2, not a controlled single-axis test) made root
+        cause ambiguous until rung 4 isolated max_num_batched_tokens specifically.
+
+  - rung:
+      index: 4
+      timestamp: "2026-01-01T10:30:00Z"
+      model_key: example-27b-nvfp4
+      served_model_name: "example-27b-nvfp4"
+      model_path: "/models/example-27b-nvfp4"
+      params:
+        max_model_len: 32768
+        max_num_batched_tokens: 8192
+        max_num_seqs: 1
+        gpu_memory_utilization: 0.85
+        kv_cache_dtype: fp8
+        attention_backend: flashinfer
+        limit_mm_per_prompt: '{"image": 0, "video": 0}'
+        extra_flags: []
+      env:
+        pytorch_cuda_alloc_conf: "expandable_segments:True"
+        vllm_version: "0.0.0-example"
+        gpu: "Example GPU 32GB"
+        gpu_total_capacity_gib: 31.41
+      outcome:
+        status: boot_ok
+        failure_site: null
+        oom_requested_bytes: null
+        oom_free_bytes: null
+      signal:
+        model_loading_gib: 18.92
+        available_kv_cache_gib: 4.71
+        gpu_kv_cache_tokens: 118935
+        max_concurrency: 3.63
+        cudagraph_pool_gib: 0.46
+        boot_time_seconds: 122.31
+      smoke_test:
+        attempted: false
+        long_context_tokens: null
+        prefill_completed: false
+        reasoning_channel_split_verified: true
+        notes: >
+          Confirmed via an OpenAI-compatible UI reasoning dropdown on two separate
+          short test turns -- reasoning_content rendered in a separate collapsible block
+          both times, confirming the reasoning-parser split works correctly on this
+          checkpoint. Not a curl/raw-API check, so technically still satisfies "visual
+          confirmation is sufficient" per 03-smoke-test.md but a long-context payload
+          was never sent -- this is real-traffic confirmation of the parser, not of
+          ceiling behavior. long_context_tokens left null because no near-ceiling-length
+          prompt was tested, only conversational-length turns.
+      notes: >
+        This is the confirmed safe floor for example-27b-nvfp4 on this card with
+        multimodal correctly disabled. Server ran live for several minutes afterward at
+        steady ~39-40 tok/s generation throughput, GPU KV cache usage 4.1-5.2%, multiple
+        successful /v1/chat/completions calls -- strong evidence this rung is solid, not
+        just a lucky boot. NEXT RUNG should climb max_model_len from 32768 toward 65536
+        with max_num_batched_tokens held at 8192, per the single-axis climb rule -- this
+        was not yet attempted as of this ladder snapshot.

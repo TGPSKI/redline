@@ -1,0 +1,68 @@
+# assets/rung-result.schema.yml
+#
+# One rung = one full boot attempt at a specific (max-model-len, max-num-batched-tokens,
+# gpu-memory-utilization) triple. Append-only. Never edit a past rung's outcome after
+# the fact -- if a number changes, that's a new rung with a new timestamp.
+#
+# This schema is the source of truth for `ladder.yml` entries. Phase files generate
+# entries that conform to this shape; the router reads them to detect progress.
+
+rung:
+  # --- identity ---
+  index: int                       # 1-based position in the ladder for this model+card pair
+  timestamp: string                # ISO 8601, UTC, when the boot was launched
+
+  # --- the experiment ---
+  model_key: string                # vanity registry key, e.g. example-27b-nvfp4
+  served_model_name: string        # --served-model-name value used
+  model_path: string                # absolute path passed to `vllm serve`
+
+  params:
+    max_model_len: int
+    max_num_batched_tokens: int
+    max_num_seqs: int
+    gpu_memory_utilization: float
+    kv_cache_dtype: string          # fp8 | auto | ...
+    attention_backend: string       # flashinfer | flash_attn | ...
+    limit_mm_per_prompt: string     # raw flag value, "" if unset, e.g. '{"image":0,"video":0}'
+    extra_flags: list[string]       # anything else passed, verbatim, for reproducibility
+
+  env:
+    pytorch_cuda_alloc_conf: string # exact value used; record "UNSET" if the var was
+                                     # accidentally misspelled or missing (this happened once --
+                                     # see notes) rather than silently omitting the field
+    vllm_version: string             # from the banner, e.g. 0.0.0-example
+    gpu: string                      # e.g. "Example GPU 32GB"
+    gpu_total_capacity_gib: float    # from the OOM error line if available, else from nvidia-smi
+
+  # --- outcome: exactly one of these populates ---
+  outcome:
+    status: string                  # boot_ok | oom_profile | oom_compile | oom_runtime |
+                                     # crash_other | not_attempted
+    failure_site: string            # free text pointer to the log line / function, e.g.
+                                     # "gpu_model_runner.py:6295 profile_run -> embed_multimodal"
+                                     # null if status == boot_ok
+    oom_requested_bytes: int        # null if not an OOM
+    oom_free_bytes: int             # null if not an OOM
+
+  # --- signal lines ---
+  # Keep this block present for every rung so consumers can rely on a stable shape.
+  # Values are null when the line was not emitted or boot failed before the signal existed.
+  signal:
+    model_loading_gib: float|null        # "Model loading took X GiB"
+    available_kv_cache_gib: float|null   # gpu_worker.py "Available KV cache memory"
+    gpu_kv_cache_tokens: int|null        # kv_cache_utils.py "GPU KV cache size"
+    max_concurrency: float|null          # kv_cache_utils.py "Maximum concurrency for N tokens... Wx"
+    cudagraph_pool_gib: float|null       # "CUDA graph pool memory"
+    boot_time_seconds: float|null        # "init engine ... took N s"
+
+  # --- post-boot smoke test, optional, fill in once you've sent a real request ---
+  smoke_test:
+    attempted: bool
+    long_context_tokens: int        # null if not attempted
+    prefill_completed: bool
+    reasoning_channel_split_verified: bool   # confirmed via raw API or UI dropdown,
+                                              # not assumed
+    notes: string
+
+  notes: string                     # anything that doesn't fit a field above

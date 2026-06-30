@@ -1,0 +1,14 @@
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local ladder output
+ladder.yml
+ladder-summary.md
