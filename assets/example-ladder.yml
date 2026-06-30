@@ -85,13 +85,59 @@ rungs:
         INVALID rung per the 02-record-ceiling classification table: this example model
         has a vision tower that the baseline doesn't route through,
         and limit_mm_per_prompt was never set to disable multimodal profiling. This OOM
-        is a multimodal-profiling-cost artifact, not a real context-length ceiling. Fixed
-        in rung 3 by setting limit_mm_per_prompt='{"image":0,"video":0}'. Also discovered
+        is a multimodal-profiling-cost artifact, not a real context-length ceiling. The
+        next rung sets limit_mm_per_prompt='{"image":0,"video":0}'. Also discovered
         here: this is architecturally dense, not MoE --
         --moe-backend marlin from rung 1 does not apply and was correctly dropped.
 
   - rung:
       index: 3
+      timestamp: "2026-01-01T10:15:00Z"
+      model_key: example-27b-nvfp4
+      served_model_name: "example-27b-nvfp4"
+      model_path: "/models/example-27b-nvfp4"
+      params:
+        max_model_len: 32768
+        max_num_batched_tokens: 8192
+        max_num_seqs: 1
+        gpu_memory_utilization: 0.85
+        kv_cache_dtype: fp8
+        attention_backend: flashinfer
+        limit_mm_per_prompt: '{"image": 0, "video": 0}'
+        extra_flags: []
+      env:
+        pytorch_cuda_alloc_conf: "UNSET"
+        vllm_version: "0.0.0-example"
+        gpu: "Example GPU 32GB"
+        gpu_total_capacity_gib: 31.41
+      outcome:
+        status: oom_runtime
+        failure_site: "_initialize_kv_caches after allocator config was not applied"
+        oom_requested_bytes: 1073741824
+        oom_free_bytes: 536870912
+      signal:
+        model_loading_gib: 19.08
+        available_kv_cache_gib: null
+        gpu_kv_cache_tokens: null
+        max_concurrency: null
+        cudagraph_pool_gib: null
+        boot_time_seconds: null
+      smoke_test:
+        attempted: false
+        long_context_tokens: null
+        prefill_completed: false
+        reasoning_channel_split_verified: false
+        notes: ""
+      notes: >
+        INVALID rung per the 02-record-ceiling classification table: the allocator
+        environment variable was misspelled in the shell command, so vLLM booted with
+        PYTORCH_CUDA_ALLOC_CONF effectively unset. Do not count this OOM as a context
+        ceiling. Record the bad environment exactly, leave the failed outcome intact,
+        and rerun the same params as a new rung with pytorch_cuda_alloc_conf set to
+        expandable_segments:True.
+
+  - rung:
+      index: 4
       timestamp: "2026-01-01T10:20:00Z"
       model_key: example-27b-nvfp4
       served_model_name: "example-27b-nvfp4"
@@ -131,16 +177,18 @@ rungs:
       notes: >
         Multimodal fix from rung 2 confirmed working: "registry.py:134 All limits of
         multimodal modalities supported by the model are set to 0, running in text-only
-        mode" logged twice (APIServer and EngineCore). Got further than rung 2 -- passed
-        weight load, torch.compile (50.95s), into profile_run's dummy forward at
+        mode" logged twice (APIServer and EngineCore). Allocator fix from rung 3 also
+        confirmed working. Got further than both invalidated rungs -- passed weight
+        load, torch.compile (50.95s), into profile_run's dummy forward at
         max_num_tokens=65536. This OOM scales with max_num_batched_tokens (the dummy
         profiling batch size), not max_model_len directly -- per 01-run-rung.md's rule,
         raising both together (as this rung did, 131072->65536 was actually a *drop* on
         both simultaneously from rung 2, not a controlled single-axis test) made root
-        cause ambiguous until rung 4 isolated max_num_batched_tokens specifically.
+        cause ambiguous until rung 5 restored the known-good floor and made the next
+        single-axis climb explicit.
 
   - rung:
-      index: 4
+      index: 5
       timestamp: "2026-01-01T10:30:00Z"
       model_key: example-27b-nvfp4
       served_model_name: "example-27b-nvfp4"
