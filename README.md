@@ -5,7 +5,7 @@ vLLM-served model on a fixed GPU. It climbs `--max-model-len` and
 `--max-num-batched-tokens` one variable at a time, clean-rebooting between rungs and
 recording the real KV-cache and concurrency signal from vLLM boot logs.
 
-The workflow is the program. The AI agent is the runtime.
+The workflow is the program. The agent is the runtime.
 
 ## Quick Start
 
